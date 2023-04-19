@@ -1,6 +1,7 @@
 import argparse
 import sys
 import subprocess
+import psutil
 from utils import Utils
 from threading import Thread
 
@@ -23,6 +24,11 @@ if __name__ == '__main__':
     )
 
     def watch_subprocess():
+
+        # pid = psutil.Process(proc.pid)
+        # children = pid.children(recursive=True)
+        # print(children)
+
         try:
             if proc.stdout:
                 while proc.returncode is None:
@@ -30,7 +36,9 @@ if __name__ == '__main__':
                     if not stdout:
                         break
                     line = stdout.decode().rstrip()
+
                     print('\u001b[40m' + f'SERVER -> ' + line + '\033[0m')
+
             _, stderr = proc.communicate()
             if stderr:
                 print('\033[0m' + stderr.decode().rstrip())
