@@ -12,7 +12,6 @@ if __debug__:
     def port_no_valid(arg: str) -> int:
         if not all(c.isdigit() for c in arg):
             raise argparse.ArgumentTypeError('Must be an integer')
-
         arg = int(arg)
         if arg > 0xffff or arg < 6000:
             raise argparse.ArgumentTypeError('Must be in range [6000, 0xffff]')
@@ -22,7 +21,15 @@ if __debug__:
                                                               '6000')
 
 else:
-    port_no_valid = lambda pn: pn == 6000
+
+    def port_no_valid(arg: str) -> int:
+        if not all(c.isdigit() for c in arg):
+            raise argparse.ArgumentTypeError('Must be an integer')
+        arg = int(arg)
+        if arg != 6000:
+            raise argparse.ArgumentTypeError('Port number must be 6000 in production mode')
+        return arg
+
     parser.add_argument('port_no', type=port_no_valid, help='''Port_no fixed at 6000 according to specifications
     (https://canvas.sydney.edu.au/courses/48387/assignments/432740?module_item_id=1929246)''')
 
