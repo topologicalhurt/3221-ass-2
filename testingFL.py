@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import os
 import json
 import copy
+import random
 from torch.utils.data import DataLoader
 import matplotlib
 import matplotlib.pyplot as plt
@@ -86,7 +87,6 @@ def aggregate_parameters(server_model, users, total_train_samples):
     for param in server_model.parameters():
         param.data = torch.zeros_like(param.data)
 
-    # i am confused here
     for user in users:
         for server_param, user_param in zip(server_model.parameters(), user.model.parameters()):
             server_param.data = server_param.data + user_param.data.clone() * user.train_samples / total_train_samples
@@ -98,6 +98,11 @@ def evaluate(users):
     for user in users:
         total_accurancy += user.test()
     return total_accurancy / len(users)
+
+
+def select_subset(users: list) -> list:
+    rand = random.randint(1, len(users))
+    return random.sample(users, rand)
 
 
 def get_data(id=""):
@@ -133,11 +138,9 @@ num_global_iterations = 100
 # creating the five clients here
 # this is the part where instead, we will have the clients
 # created as separate programs that connect to server
-total_train_samples = 0
 for i in range(1, num_user + 1):
     user = UserAVG(i, server_model, learning_rate, batch_size)
     users.append(user)
-    total_train_samples += user.train_samples
     # in particular this send_parameters function is of interest
     # will have to be translated to compress and send data to each client
     # and then client decodes and reads this data
@@ -162,27 +165,26 @@ for glob_iter in range(num_global_iterations):
         avgLoss += user.train(1)
 
     loss.append(avgLoss)
+    chosen_ones = select_subset(users)
+    chosen_train_sample_amount = 0
+    for u in chosen_ones:
+        chosen_train_sample_amount += u.train_samples
+    aggregate_parameters(server_model, chosen_ones, chosen_train_sample_amount)
 
-    # the aggregate_parameters function does something
-    # ngl i don't know what happens here but i feel like our algorithm should be different
-    # im not sure if this is already using a subset of the users because we need to select a subset at random
-    # this might just be using all of them to aggregate
-    aggregate_parameters(server_model, users, total_train_samples)
+
+plt.figure(1, figsize=(5, 5))
+plt.plot(acc, label="FedAvg", linewidth=1)
+plt.ylim([0.5, 0.99])
+plt.legend(loc='upper right', prop={'size': 12}, ncol=2)
+plt.ylabel('Testing Acc')
+plt.xlabel('Global rounds')
+plt.show()
 
 """
 sum notes:
-This is pretty much ripped straight from week 6 tutorial with a few changes to make it run
-I understand most things apart from what aggregate is doing
 
-** It is currently using Multinomial Logistic Regression as the classification method
-It is specified that:
- To obtain the local model,
-clients can use both Gradient Descent (GD) or Mini-Batch Gradient Descent (Mini-Batch GD)
-as the optimization methods.
-This shouldnt be to hard to change to
-
-Also at the end we have to randomly select a subset of clients to perform the aggregation on
-I believe that currently it just uses all the clients
-This should be pretty ez
-
+If the randomly selected subset of clients is capable of being empty, it just
+fucks up everything so be careful with that. 
+Right now, it just selects a minimum of 1. 
+i.e. 1 to 5 clients randomly chosen for aggregation.
 """
