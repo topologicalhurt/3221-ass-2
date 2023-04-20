@@ -2,38 +2,54 @@ import argparse
 import threading
 import sys
 import subprocess
-
-import psutil
+import struct
 import os
+from utils import Utils, ThreadSafeCounter
+
+if Utils.POSIX:
+    import signal
 
 
-from utils import Utils
+class ClientManager:
 
+    def __init__(self):
+        self.event = threading.Event()
+        self.tsc = ThreadSafeCounter(Utils.NET_CONF.n_clients)
+        self.clients = None
+        if Utils.POSIX:
+            signal.signal(signal.SIGUSR1, self.__dec_tsc_sigusr1())
 
-def start_flclient(cid: int, opt_method: bool):
-    opt_method = '1' if opt_method else '0'
-    proc = subprocess.Popen(
-        [sys.executable, 'Comp3221_FLClient.py', f'client{cid}', str(Utils.NET_CONF.port + cid), opt_method],
-        stdout=subprocess.PIPE,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    proc.stdout.write(int.to_bytes(os.getpid(), byteorder='big', length=4))
-    print(proc.stdout.readline())
-    return proc
+    if Utils.POSIX:
+        def __dec_tsc_sigusr1(self):
+            self.tsc -= 1
+            if int(self.tsc) <= 0:
+                self.event.set()
 
+    def start(self):
+        self.clients = [ClientManager.__start_flclient(i, True) for i in range(Utils.NET_CONF.n_clients)]
+        self.__spawn_client_watchers(threads=[])
 
-# @Utils.thread_spawner
-# def spawn_clients(threads: list):
-#     for i in range(Utils.NET_CONF.n_clients):
-#         threads.append(threading.Thread(target=start_flclient, args=[i, True]))
+    @staticmethod
+    def __start_flclient(cid: int, opt_method: bool):
+        opt_method = '1' if opt_method else '0'
+        proc = subprocess.Popen(
+            [sys.executable, 'Comp3221_FLClient.py', f'client{cid}', str(Utils.NET_CONF.port + cid), opt_method],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE
+        )
+        proc.stdin.write(struct.pack('!h', os.getpid()))
+        proc.stdin.flush()
+        return proc
 
-def spawn_clients():
-    clients = [p for p in [start_flclient(i, True) for i in range(Utils.NET_CONF.n_clients)]]
+    @Utils.thread_spawner
+    def __spawn_client_watchers(self, threads=None):
+        for p in self.clients:
+            threads.append(threading.Thread(target=ClientManager.__watch_client, args=[p, self.event]))
 
-    # ppid = psutil.Process(os.getpid())
-    # print(len(ppid.children()))
-    # print(clients)
+    @staticmethod
+    def __watch_client(p, event: threading.Event):
+        event.wait()
+        print('passed!')
 
 
 if __name__ == '__main__':
@@ -61,4 +77,5 @@ if __name__ == '__main__':
         port_no = args.port_no
     sub_client = args.sub_client
 
-    spawn_clients()
+    cm = ClientManager()
+    cm.start()

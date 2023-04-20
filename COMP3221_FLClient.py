@@ -1,13 +1,15 @@
 import argparse
 import re
+import struct
 import threading
 import subprocess
 import sys
-import psutil
-
 import os
 
 from utils import Utils
+
+if Utils.POSIX:
+    import signal
 
 
 class Client:
@@ -17,17 +19,12 @@ class Client:
         self.port_no = port_no
         self.opt_method = opt_method
 
-        # ppid = psutil.Process(os.getppid())
-        # print(len(ppid.children()))
-
-        # sys.stdout.read()
-        # print('done')
-
 
 if __name__ == '__main__':
 
-    ppid = sys.stdout.readline()
-    print(ppid)
+    # Get parent pid
+    line = sys.stdin.buffer.read(4)
+    ppid = struct.unpack('!h', line)[0]
 
     parser = argparse.ArgumentParser(
         prog='Comp3221_FLClient.py',
@@ -54,3 +51,7 @@ if __name__ == '__main__':
                                          'between client_port and starting port')
 
     client = Client(args.client_id, args.port_client, args.opt_method)
+
+    # SETUP DONE HERE
+    if Utils.POSIX:
+        os.kill(ppid, signal.SIGUSR1)

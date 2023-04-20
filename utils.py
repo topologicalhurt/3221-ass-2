@@ -2,10 +2,15 @@ import argparse
 import json
 import socket
 from contextlib import closing
+import threading
+import os
 
 from conf import Conf
 
+
 class Utils:
+
+    POSIX = os.name != 'nt'
 
     @staticmethod
     def __read_conf() -> Conf:
@@ -18,11 +23,12 @@ class Utils:
     @staticmethod
     def thread_spawner(func):
         def wrapper(*args, **kwargs):
-            threads = []
-            func(threads, *args, **kwargs)
-            for t in threads:
+            if 'threads' not in kwargs or kwargs['threads']:
+                raise ValueError('Must provide thread accumulator')
+            func(*args, **kwargs)
+            for t in kwargs['threads']:
                 t.start()
-            for t in threads:
+            for t in kwargs['threads']:
                 t.join()
 
         return wrapper
@@ -61,5 +67,24 @@ class Utils:
                 raise argparse.ArgumentTypeError('Port number must be 6000 in production mode')
 
         return arg
+
+
+class ThreadSafeCounter:
+
+    LOCK = threading.Lock()
+
+    def __init__(self, count: int):
+        self.count = count
+
+    def __add__(self, other: int):
+        with ThreadSafeCounter.LOCK:
+            return self.count + other
+
+    def __sub__(self, other: int):
+        with ThreadSafeCounter.LOCK:
+            return self.count - other
+
+    def __int__(self):
+        return self.count
 
 
