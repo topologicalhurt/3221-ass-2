@@ -5,6 +5,7 @@ import os
 import json
 import copy
 import random
+import ast
 from torch.utils.data import DataLoader
 import matplotlib
 import matplotlib.pyplot as plt
@@ -79,6 +80,11 @@ class UserAVG():
 def send_parameters(server_model, users):
     for user in users:
         # instead of just having access to the users, we will send the data here
+        # testing a method of converting to string and back for parameters
+        for param in server_model.parameters():
+            npa = param.detach().numpy()
+            new = torch.Tensor(npa)
+
         user.set_parameters(server_model)
 
 
@@ -133,7 +139,7 @@ users = []
 server_model = MCLR()
 batch_size = 20
 learning_rate = 0.01
-num_global_iterations = 100
+num_global_iterations = 1
 
 # creating the five clients here
 # this is the part where instead, we will have the clients
@@ -187,4 +193,8 @@ If the randomly selected subset of clients is capable of being empty, it just
 fucks up everything so be careful with that. 
 Right now, it just selects a minimum of 1. 
 i.e. 1 to 5 clients randomly chosen for aggregation.
+
+It is hard to send the information of the server model:
+Will have to find a way to define the size, shape of model and how each client can reproduce this
+luckily the actual data within the model seems like it shouldnt be an issue to send from server to client
 """
