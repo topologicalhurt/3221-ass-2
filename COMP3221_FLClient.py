@@ -1,33 +1,42 @@
 import argparse
 import re
+import struct
 import threading
 import subprocess
 import sys
-import psutil
-
 import os
 
-from utils import Utils
+from utils import Utils, Comms
+
+if Utils.POSIX:
+    import signal
 
 
 class Client:
 
-    def __init__(self, id: str, port_no: int, opt_method: bool):
+    def __init__(self, id: int, port_no: int, opt_method: bool):
         self.id = id
         self.port_no = port_no
         self.opt_method = opt_method
 
-        # ppid = psutil.Process(os.getppid())
-        # print(len(ppid.children()))
+        # Listen to incoming packets
+        self.tcpm = Comms(Utils.NET_CONF.host, self.port_no)  # TCP manager
+        self.tcpm.start_listener(False, threads=[])
 
-        # sys.stdout.read()
-        # print('done')
+    @Comms.tcp_broadcaster
+    def send_handshake(self, host, port):
+        # Assume server centralised (we know where to find it without prior contact)
+        header = Utils.ClientComms.HANDSHAKE.value
+        client_size = b'0'  # TODO: how do I get this?
+        packet = header + client_size + struct.pack('!h', self.id)
+        return packet
 
 
 if __name__ == '__main__':
 
-    ppid = sys.stdout.readline()
-    print(ppid)
+    # Get parent pid
+    line = sys.stdin.buffer.read(2)
+    ppid = struct.unpack('!h', line)[0]
 
     parser = argparse.ArgumentParser(
         prog='Comp3221_FLClient.py',
@@ -53,4 +62,16 @@ if __name__ == '__main__':
         raise argparse.ArgumentTypeError('ID indexed incorrectly (client_id digit must match difference '
                                          'between client_port and starting port')
 
-    client = Client(args.client_id, args.port_client, args.opt_method)
+    client = Client(cid, args.port_client, args.opt_method)
+
+    # SETUP DONE AFTER THIS LINE (SERVER WILL NOT BLOCK FOR CHILD PAST THIS POINT)
+
+    # if Utils.POSIX:
+    #     os.kill(ppid, signal.SIGUSR1)
+
+    # Prefer the pipe method - better portability - ensures TCP protocol doesn't run into any timing errors
+    sys.stdout.buffer.write(Utils.ClientComms.RESUME_SERVER.value)
+
+    client.send_handshake(Utils.NET_CONF.host, Utils.NET_CONF.port)
+
+

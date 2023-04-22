@@ -2,38 +2,67 @@ import argparse
 import threading
 import sys
 import subprocess
-
-import psutil
+import struct
 import os
+import socket
+
+from utils import Utils, ThreadSafeCounter, Comms
+
+if Utils.POSIX:
+    import signal
 
 
-from utils import Utils
+class ClientManager:
 
+    def __init__(self):
+        self.tsc = ThreadSafeCounter(Utils.NET_CONF.n_clients)
+        self.clients = None
+        self.barrier = threading.Barrier(Utils.NET_CONF.n_clients)
 
-def start_flclient(cid: int, opt_method: bool):
-    opt_method = '1' if opt_method else '0'
-    proc = subprocess.Popen(
-        [sys.executable, 'Comp3221_FLClient.py', f'client{cid}', str(Utils.NET_CONF.port + cid), opt_method],
-        stdout=subprocess.PIPE,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    proc.stdout.write(int.to_bytes(os.getpid(), byteorder='big', length=4))
-    print(proc.stdout.readline())
-    return proc
+        # Listen to incoming packets
+        self.tcpm = Comms(Utils.NET_CONF.host, port_no)  # TCP manager
+        self.tcpm.start_listener(False, threads=[])
 
+        # if Utils.POSIX:
+        #     self.event = threading.Event()
+        #     signal.signal(signal.SIGUSR1, self.__dec_tsc_sigusr1())
 
-# @Utils.thread_spawner
-# def spawn_clients(threads: list):
-#     for i in range(Utils.NET_CONF.n_clients):
-#         threads.append(threading.Thread(target=start_flclient, args=[i, True]))
+    # Deprecated for now - just not really worth using signals over pipes
+    # if Utils.POSIX:
+    #     def __dec_tsc_sigusr1(self):
+    #         self.tsc -= 1
+    #         if int(self.tsc) <= 0:
+    #             self.event.set()
 
-def spawn_clients():
-    clients = [p for p in [start_flclient(i, True) for i in range(Utils.NET_CONF.n_clients)]]
+    def start(self):
+        self.clients = [ClientManager.__start_flclient(i, True) for i in range(Utils.NET_CONF.n_clients)]
+        self.__spawn_client_watchers(True, threads=[])
 
-    # ppid = psutil.Process(os.getpid())
-    # print(len(ppid.children()))
-    # print(clients)
+    @staticmethod
+    def __start_flclient(cid: int, opt_method: bool):
+        opt_method = '1' if opt_method else '0'
+        proc = subprocess.Popen(
+            [sys.executable, 'Comp3221_FLClient.py', f'client{cid}', str(Utils.NET_CONF.port + cid), opt_method],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE
+        )
+
+        _ = proc.communicate(input=struct.pack('!h', os.getpid()))[0]
+
+        return proc
+
+    @Utils.thread_spawner
+    def __spawn_client_watchers(self, join, threads=None):
+        for i, p in enumerate(self.clients):
+            threads.append(threading.Thread(target=ClientManager.__watch_client, args=[i, p, self.tcpm, self.barrier]))
+
+    @staticmethod
+    def __watch_client(cid: int, p, tcpm: Comms, barrier: threading.Barrier):
+        out = p.communicate()[0]
+        # Used to ensure all subprocesses are not competing with threads before any packets arrive
+        if out == Utils.ClientComms.RESUME_SERVER.value:
+            sys.stdout.write('Client done\n')
+            sys.stdout.write(f'{tcpm.buffer}\n')
 
 
 if __name__ == '__main__':
@@ -61,4 +90,5 @@ if __name__ == '__main__':
         port_no = args.port_no
     sub_client = args.sub_client
 
-    spawn_clients()
+    cm = ClientManager()
+    cm.start()

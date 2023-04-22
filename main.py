@@ -1,7 +1,6 @@
 import argparse
 import sys
 import subprocess
-import psutil
 from utils import Utils
 from threading import Thread
 
@@ -24,11 +23,6 @@ if __name__ == '__main__':
     )
 
     def watch_subprocess():
-
-        # pid = psutil.Process(proc.pid)
-        # children = pid.children(recursive=True)
-        # print(children)
-
         try:
             if proc.stdout:
                 while proc.returncode is None:
