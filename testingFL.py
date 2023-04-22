@@ -5,6 +5,7 @@ import os
 import json
 import copy
 import random
+import numpy as np
 import ast
 from torch.utils.data import DataLoader
 import matplotlib
@@ -79,12 +80,39 @@ class UserAVG():
 
 def send_parameters(server_model, users):
     for user in users:
-        # instead of just having access to the users, we will send the data here
-        # testing a method of converting to string and back for parameters
-        for param in server_model.parameters():
-            npa = param.detach().numpy()
-            new = torch.Tensor(npa)
+        # ok so; Challenge:
+        # finding a way to get server model into string data so it can be converted into bytes
+        # so far, the model has parameters (2 of them) that make up the model and
+        # there is a way to convert parameter into binary data
+        # process:
+        # param -> torch tensor obj -> numpy array -> list -> string -> bytes
+        # reconstructing:
+        # string -> list -> np arr -> tensor -> param
+        # now the problem,
+        # we dont exactly know that the model has 2 parameters or their size
+        # stuff like this is hard to re create in the client without the code to create the model
+        # once the size and shape of the model is present within the client, it shouldnt be a problem
+        # because then we can leech of the old size and shape as it wont change
+        # idk what to do :(
 
+        param_list = []
+        for param in server_model.parameters():
+            # from param to tensor to np arr
+            npa = param.detach().numpy()
+            # from np arr to list to str
+            string_list = str(npa.tolist())
+            # one step opt (bit cluttered)
+            # string_list = str(param.detach().numpy().tolist())
+            param_list.append(string_list)
+
+            reconstructed_list = ast.literal_eval(string_list)
+            reconstructed_npa = np.asarray(reconstructed_list)
+            reconstructed_tensor = torch.Tensor(reconstructed_npa)
+            reconstructed_param = torch.nn.parameter.Parameter(reconstructed_tensor, requires_grad=True)
+            print(reconstructed_param)
+
+        # here instead of sending server model, the goal is to send the list of strings
+        # and have the client be able to create a model from this
         user.set_parameters(server_model)
 
 
