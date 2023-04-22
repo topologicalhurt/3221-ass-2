@@ -23,7 +23,7 @@ class Client:
 if __name__ == '__main__':
 
     # Get parent pid
-    line = sys.stdin.buffer.read(4)
+    line = sys.stdin.buffer.read(2)
     ppid = struct.unpack('!h', line)[0]
 
     parser = argparse.ArgumentParser(
@@ -52,6 +52,10 @@ if __name__ == '__main__':
 
     client = Client(args.client_id, args.port_client, args.opt_method)
 
-    # SETUP DONE HERE
-    if Utils.POSIX:
-        os.kill(ppid, signal.SIGUSR1)
+    # SETUP DONE AFTER THIS LINE (SERVER WILL NOT BLOCK FOR CHILD PAST THIS POINT)
+
+    # if Utils.POSIX:
+    #     os.kill(ppid, signal.SIGUSR1)
+
+    # Prefer the pipe method - better portability
+    sys.stdout.buffer.write(Utils.ClientComms.RESUME_SERVER.value)

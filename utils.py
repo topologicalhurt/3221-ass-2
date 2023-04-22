@@ -4,11 +4,14 @@ import socket
 from contextlib import closing
 import threading
 import os
+from enum import Enum
 
 from conf import Conf
 
 
 class Utils:
+
+    # TODO: move these to a separate constants file
 
     POSIX = os.name != 'nt'
 
@@ -20,10 +23,14 @@ class Utils:
 
     NET_CONF = __read_conf()
 
+    ClientComms = Enum('Comms', {'RESUME_SERVER': b'1',
+                                 'RESUME_CLIENT': b'2',
+                                 'DISPATCH': b'3'})
+
     @staticmethod
     def thread_spawner(func):
         def wrapper(*args, **kwargs):
-            if 'threads' not in kwargs or kwargs['threads']:
+            if 'threads' not in kwargs or not hasattr(kwargs['threads'], '__iter__'):
                 raise ValueError('Must provide thread accumulator')
             func(*args, **kwargs)
             for t in kwargs['threads']:
@@ -36,18 +43,13 @@ class Utils:
     @staticmethod
     def verify_flag(arg: str) -> bool:
         arg = arg.lower()
-        if arg not in {'true', 'false', '1', '0'}:
-            raise argparse.ArgumentTypeError('A flag must be one of: [true, false, 1, 0]')
-
         match arg:
-            case 'true':
+            case 'true' | '1':
                 return True
-            case 'false':
+            case 'false' | '0':
                 return False
-            case '1':
-                return True
-            case '0':
-                return False
+            case _:
+                raise argparse.ArgumentTypeError('A flag must be one of: [true, false, 1, 0]')
 
     @staticmethod
     def port_no_valid(arg: str) -> int:

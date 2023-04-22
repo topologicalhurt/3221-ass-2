@@ -4,6 +4,7 @@ import sys
 import subprocess
 import struct
 import os
+
 from utils import Utils, ThreadSafeCounter
 
 if Utils.POSIX:
@@ -13,17 +14,19 @@ if Utils.POSIX:
 class ClientManager:
 
     def __init__(self):
-        self.event = threading.Event()
         self.tsc = ThreadSafeCounter(Utils.NET_CONF.n_clients)
         self.clients = None
-        if Utils.POSIX:
-            signal.signal(signal.SIGUSR1, self.__dec_tsc_sigusr1())
+        self.barrier = threading.Barrier(Utils.NET_CONF.n_clients)
+        # if Utils.POSIX:
+        #     self.event = threading.Event()
+        #     signal.signal(signal.SIGUSR1, self.__dec_tsc_sigusr1())
 
-    if Utils.POSIX:
-        def __dec_tsc_sigusr1(self):
-            self.tsc -= 1
-            if int(self.tsc) <= 0:
-                self.event.set()
+    # Deprecated for now - just not really worth using signals over pipes
+    # if Utils.POSIX:
+    #     def __dec_tsc_sigusr1(self):
+    #         self.tsc -= 1
+    #         if int(self.tsc) <= 0:
+    #             self.event.set()
 
     def start(self):
         self.clients = [ClientManager.__start_flclient(i, True) for i in range(Utils.NET_CONF.n_clients)]
@@ -37,19 +40,21 @@ class ClientManager:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE
         )
-        proc.stdin.write(struct.pack('!h', os.getpid()))
-        proc.stdin.flush()
+
+        _ = proc.communicate(input=struct.pack('!h', os.getpid()))[0]
+
         return proc
 
     @Utils.thread_spawner
     def __spawn_client_watchers(self, threads=None):
         for p in self.clients:
-            threads.append(threading.Thread(target=ClientManager.__watch_client, args=[p, self.event]))
+            threads.append(threading.Thread(target=ClientManager.__watch_client, args=[p, self.barrier]))
 
     @staticmethod
-    def __watch_client(p, event: threading.Event):
-        event.wait()
-        print('passed!')
+    def __watch_client(p, barrier: threading.Barrier):
+        out = p.communicate()[0]
+        if out == Utils.ClientComms.RESUME_SERVER.value:
+            print('client done')
 
 
 if __name__ == '__main__':
