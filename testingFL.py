@@ -12,6 +12,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 
+# i think this code will be in client
 class MCLR(nn.Module):
     def __init__(self):
         super(MCLR, self).__init__()
@@ -30,9 +31,11 @@ class MCLR(nn.Module):
         return output
 
 
+# this is client
 class UserAVG():
     def __init__(self, client_id, model, learning_rate, batch_size):
 
+        self.client_id = client_id
         self.X_train, self.y_train, self.X_test, self.y_test, self.train_samples, self.test_samples = get_data(
             client_id)
         self.train_data = [(x, y) for x, y in zip(self.X_train, self.y_train)]
@@ -48,9 +51,23 @@ class UserAVG():
 
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
 
-    def set_parameters(self, model):
-        for old_param, new_param in zip(self.model.parameters(), model.parameters()):
-            old_param.data = new_param.data.clone()
+    def set_parameters(self, data_string):
+        # first, reconstruct
+        param_list = ast.literal_eval(data_string)
+        new_param_list = []
+        for param in param_list:
+            reconstructed_list = ast.literal_eval(param)
+            reconstructed_npa = np.asarray(reconstructed_list)
+            reconstructed_tensor = torch.Tensor(reconstructed_npa)
+            reconstructed_param = torch.nn.parameter.Parameter(reconstructed_tensor, requires_grad=True)
+            new_param_list.append(reconstructed_param)
+
+        new_param_dict = {'fc1.weight': new_param_list[0], 'fc1.bias': new_param_list[1]}
+        # now, overwrite local model with new information from server
+
+        self.model.load_state_dict(new_param_dict)
+
+
 
     def train(self, epochs):
         loss = 0
@@ -59,7 +76,7 @@ class UserAVG():
             self.model.train()
             for batch_idx, (X, y) in enumerate(self.trainloader):
                 self.optimizer.zero_grad()
-                print(len(X))
+                # print(len(X))
                 output = self.model(X)
                 loss = self.loss(output, y)
                 loss.backward()
@@ -72,59 +89,72 @@ class UserAVG():
         for x, y in self.testloader:
             output = self.model(x)
             test_acc += (torch.sum(torch.argmax(output, dim=1) == y) * 1. / y.shape[0]).item()
-            print(str(self.id) + ", Accuracy of client ", self.id, " is: ", test_acc)
+            # print(str(self.id) + ", Accuracy of client ", self.id, " is: ", test_acc)
         return test_acc
+
+    def get_data_string(self):
+        param_list = []
+        for param in self.model.parameters():
+            npa = param.detach().numpy()
+            string_list = str(npa.tolist())
+            param_list.append(string_list)
+        return str(param_list)
 
 
 # THIS IS THE STUFF THAT WOULD ACTUALLY BE IN SERVER
 
 def send_parameters(server_model, users):
+    # ok so; Challenge:
+    # finding a way to get server model into string data so it can be converted into bytes
+    # so far, the model has parameters (2 of them) that make up the model and
+    # there is a way to convert parameter into binary data
+    # process:
+    # param -> torch tensor obj -> numpy array -> list -> string -> bytes
+    # reconstructing:
+    # string -> list -> np arr -> tensor -> param
+    # now the problem,
+    # we dont exactly know that the model has 2 parameters or their size
+    # stuff like this is hard to re create in the client without the code to create the model
+    # once the size and shape of the model is present within the client, it shouldnt be a problem
+    # because then we can leech of the old size and shape as it wont change
+
+    param_list = []
+    for item in server_model:
+        # from tensor to np arr
+        npa = item.numpy()
+        # from np arr to list to str
+        string_list = str(npa.tolist())
+        # one step opt (bit cluttered)
+        # string_list = str(param.detach().numpy().tolist())
+        param_list.append(string_list)
+
+    big_data = str(param_list)
+    # now we are sending a string to each user
+    # this string should contain all necessary data
     for user in users:
-        # ok so; Challenge:
-        # finding a way to get server model into string data so it can be converted into bytes
-        # so far, the model has parameters (2 of them) that make up the model and
-        # there is a way to convert parameter into binary data
-        # process:
-        # param -> torch tensor obj -> numpy array -> list -> string -> bytes
-        # reconstructing:
-        # string -> list -> np arr -> tensor -> param
-        # now the problem,
-        # we dont exactly know that the model has 2 parameters or their size
-        # stuff like this is hard to re create in the client without the code to create the model
-        # once the size and shape of the model is present within the client, it shouldnt be a problem
-        # because then we can leech of the old size and shape as it wont change
-        # idk what to do :(
-
-        param_list = []
-        for param in server_model.parameters():
-            # from param to tensor to np arr
-            npa = param.detach().numpy()
-            # from np arr to list to str
-            string_list = str(npa.tolist())
-            # one step opt (bit cluttered)
-            # string_list = str(param.detach().numpy().tolist())
-            param_list.append(string_list)
-
-            reconstructed_list = ast.literal_eval(string_list)
-            reconstructed_npa = np.asarray(reconstructed_list)
-            reconstructed_tensor = torch.Tensor(reconstructed_npa)
-            reconstructed_param = torch.nn.parameter.Parameter(reconstructed_tensor, requires_grad=True)
-            print(reconstructed_param)
-
-        # here instead of sending server model, the goal is to send the list of strings
-        # and have the client be able to create a model from this
-        user.set_parameters(server_model)
+        user.set_parameters(big_data)
 
 
-def aggregate_parameters(server_model, users, total_train_samples):
+def receive_parameters(data_string):
+    outer_list = ast.literal_eval(data_string)
+    output = []
+    for item in outer_list:
+        reconstructed_list = ast.literal_eval(item)
+        reconstructed_npa = np.asarray(reconstructed_list)
+        reconstructed_tensor = torch.Tensor(reconstructed_npa)
+        output.append(reconstructed_tensor)
+    return output
+
+
+def aggregate_parameters(server_model_info, client_models: dict, total_train_samples):
     # Clear global model before aggregation
-    for param in server_model.parameters():
-        param.data = torch.zeros_like(param.data)
+    output = [torch.zeros_like(server_model_info[0]), torch.zeros_like(server_model_info[1])]
 
-    for user in users:
-        for server_param, user_param in zip(server_model.parameters(), user.model.parameters()):
-            server_param.data = server_param.data + user_param.data.clone() * user.train_samples / total_train_samples
-    return server_model
+    for user_weight in client_models.keys():
+        for i in range(2):
+            # server_param = server_param.data + user_param.data.clone() * user.train_samples / total_train_samples
+            output[i] = torch.add(output[i], client_models[user_weight][i], alpha=(user_weight / total_train_samples))
+    return output
 
 
 def evaluate(users):
@@ -164,47 +194,63 @@ def get_data(id=""):
 
 num_user = 5
 users = []
-server_model = MCLR()
+model_within_client = MCLR()
 batch_size = 20
-learning_rate = 0.01
-num_global_iterations = 1
+learning_rate = 0.05
+num_global_iterations = 200
 
 # creating the five clients here
-# this is the part where instead, we will have the clients
-# created as separate programs that connect to server
 for i in range(1, num_user + 1):
-    user = UserAVG(i, server_model, learning_rate, batch_size)
+    user = UserAVG(i, model_within_client, learning_rate, batch_size)
     users.append(user)
-    # in particular this send_parameters function is of interest
-    # will have to be translated to compress and send data to each client
-    # and then client decodes and reads this data
-    send_parameters(server_model, users)
+# creating the info for server model
+server_model_info = [torch.rand([10, 784]), torch.rand([10])]
+# the server_model_info is just a list with 2 tensors representing the input and output of the model
 
-# clients created now we can run
 
+# running
 loss = []
 acc = []
 
 for glob_iter in range(num_global_iterations):
     # here we have the send parameters again. final program will have altered send_parameters ofcors
-    send_parameters(server_model, users)
+    send_parameters(server_model_info, users)
 
-    # each user evaluates the average acc of global model
+    # this is not necessary but would be printed from user
     avg_acc = evaluate(users)
     acc.append(avg_acc)
     print("Global Round:", glob_iter + 1, "Average accuracy across all clients : ", avg_acc)
 
+    # the user.train part is necessary i think
+    # this would also be run in each individual client
     avgLoss = 0
     for user in users:
         avgLoss += user.train(1)
-
     loss.append(avgLoss)
+
+    # not sure yet how to get info for amount of train_samples from user
     chosen_ones = select_subset(users)
     chosen_train_sample_amount = 0
+    chosen_ints = []
     for u in chosen_ones:
         chosen_train_sample_amount += u.train_samples
-    aggregate_parameters(server_model, chosen_ones, chosen_train_sample_amount)
+        chosen_ints.append(u.client_id)
 
+    # receive new models
+    string_data = []
+    weight_data = []
+    client_models = {}  # key = weight, value = data
+    for user in users:
+        # seems redundant here but here the data would be received as a string
+        string_data.append(user.get_data_string())
+
+        weight_data.append(user.train_samples)
+
+    for i in chosen_ints:
+        # then converted back into the datatype that server model is
+        client_models[weight_data[i-1]] = receive_parameters(string_data[i-1])
+
+    server_model_info = aggregate_parameters(server_model_info, client_models, chosen_train_sample_amount)
 
 plt.figure(1, figsize=(5, 5))
 plt.plot(acc, label="FedAvg", linewidth=1)
