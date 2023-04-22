@@ -4,8 +4,9 @@ import sys
 import subprocess
 import struct
 import os
+import socket
 
-from utils import Utils, ThreadSafeCounter
+from utils import Utils, ThreadSafeCounter, Comms
 
 if Utils.POSIX:
     import signal
@@ -17,6 +18,11 @@ class ClientManager:
         self.tsc = ThreadSafeCounter(Utils.NET_CONF.n_clients)
         self.clients = None
         self.barrier = threading.Barrier(Utils.NET_CONF.n_clients)
+
+        # Listen to incoming packets
+        self.tcpm = Comms(Utils.NET_CONF.host, port_no)  # TCP manager
+        self.tcpm.start_listener(False, threads=[])
+
         # if Utils.POSIX:
         #     self.event = threading.Event()
         #     signal.signal(signal.SIGUSR1, self.__dec_tsc_sigusr1())
@@ -30,7 +36,7 @@ class ClientManager:
 
     def start(self):
         self.clients = [ClientManager.__start_flclient(i, True) for i in range(Utils.NET_CONF.n_clients)]
-        self.__spawn_client_watchers(threads=[])
+        self.__spawn_client_watchers(True, threads=[])
 
     @staticmethod
     def __start_flclient(cid: int, opt_method: bool):
@@ -46,15 +52,17 @@ class ClientManager:
         return proc
 
     @Utils.thread_spawner
-    def __spawn_client_watchers(self, threads=None):
-        for p in self.clients:
-            threads.append(threading.Thread(target=ClientManager.__watch_client, args=[p, self.barrier]))
+    def __spawn_client_watchers(self, join, threads=None):
+        for i, p in enumerate(self.clients):
+            threads.append(threading.Thread(target=ClientManager.__watch_client, args=[i, p, self.tcpm, self.barrier]))
 
     @staticmethod
-    def __watch_client(p, barrier: threading.Barrier):
+    def __watch_client(cid: int, p, tcpm: Comms, barrier: threading.Barrier):
         out = p.communicate()[0]
+        # Used to ensure all subprocesses are not competing with threads before any packets arrive
         if out == Utils.ClientComms.RESUME_SERVER.value:
-            print('client done')
+            sys.stdout.write('Client done\n')
+            sys.stdout.write(f'{tcpm.buffer}\n')
 
 
 if __name__ == '__main__':
